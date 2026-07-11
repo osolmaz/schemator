@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { Command } from "commander";
 import { findSkillsRoot, maybeHandleSkillflag } from "skillflag";
 import { renderPatchPlan } from "./apply.js";
-import { writeCodexReviews } from "./codex-review.js";
+import { writeReviewerReviews, type ReviewerStrategy } from "./codex-review.js";
 import { aggregateFromFiles, combineAggregates, deriveFinalGraph, runConvergence } from "./convergence.js";
 import { diffGraphs, renderGraphDiff } from "./diff.js";
 import { extractGraph } from "./extract/index.js";
@@ -61,11 +61,16 @@ program
   .requiredOption("--out <dir>", "review output directory")
   .option("--context <path>", "project/task context Markdown")
   .option("--jobs <dir>", "also write independent field-review prompts")
-  .option("--strategy <name>", "review strategy", "codex")
-  .option("--codex-command <path>", "Codex executable for --strategy codex", "codex")
-  .option("--codex-model <name>", "Codex model for --strategy codex")
-  .option("--codex-timeout-ms <n>", "per-field Codex timeout in milliseconds", "120000")
-  .option("--codex-concurrency <n>", "maximum concurrent Codex reviewers", "4")
+  .option("--strategy <name>", "review strategy: codex, pi, command, or local", "codex")
+  .option("--reviewer-command <path>", "reviewer executable for codex, pi, or command strategy")
+  .option("--reviewer-model <name>", "provider/model or model name passed to the reviewer")
+  .option("--reviewer-timeout-ms <n>", "per-field reviewer timeout in milliseconds", "120000")
+  .option("--reviewer-concurrency <n>", "maximum concurrent external reviewers", "4")
+  .option("--reviewer-arg <arg>", "extra reviewer argument; repeat for multiple args", collectOption, [])
+  .option("--codex-command <path>", "deprecated alias for --reviewer-command with --strategy codex")
+  .option("--codex-model <name>", "deprecated alias for --reviewer-model with --strategy codex")
+  .option("--codex-timeout-ms <n>", "deprecated alias for --reviewer-timeout-ms")
+  .option("--codex-concurrency <n>", "deprecated alias for --reviewer-concurrency")
   .action(async (options: ReviewCommandOptions) => {
     await runCommand(async () => {
       const graph = assertModelGraph(await readJson(resolvePath(options.graph)));
@@ -73,14 +78,15 @@ program
       if (options.jobs) {
         await writeReviewJobs(graph, resolvePath(options.jobs), reviewContextOptions(projectContext));
       }
-      const reviews = options.strategy === "codex"
-        ? await writeCodexReviews(graph, resolvePath(options.out), {
-          ...codexOptions(options),
+      const reviews = options.strategy === "local"
+        ? await writeDeterministicReviews(graph, resolvePath(options.out), {
+          strategy: "local",
           ...reviewContextOptions(projectContext),
         })
-        : options.strategy === "local"
-          ? await writeDeterministicReviews(graph, resolvePath(options.out), {
-            strategy: "local",
+        : isReviewerStrategy(options.strategy)
+          ? await writeReviewerReviews(graph, resolvePath(options.out), {
+            ...reviewerOptions(options),
+            strategy: options.strategy,
             ...reviewContextOptions(projectContext),
           })
           : unsupportedStrategy(options.strategy);
@@ -202,11 +208,16 @@ program
   .requiredOption("--out <dir>", "run output directory")
   .option("--context <path>", "project/task context Markdown")
   .option("--max-iterations <n>", "maximum simplification iterations", "4")
-  .option("--strategy <name>", "review strategy", "codex")
-  .option("--codex-command <path>", "Codex executable for --strategy codex", "codex")
-  .option("--codex-model <name>", "Codex model for --strategy codex")
-  .option("--codex-timeout-ms <n>", "per-field Codex timeout in milliseconds", "120000")
-  .option("--codex-concurrency <n>", "maximum concurrent Codex reviewers", "4")
+  .option("--strategy <name>", "review strategy: codex, pi, command, or local", "codex")
+  .option("--reviewer-command <path>", "reviewer executable for codex, pi, or command strategy")
+  .option("--reviewer-model <name>", "provider/model or model name passed to the reviewer")
+  .option("--reviewer-timeout-ms <n>", "per-field reviewer timeout in milliseconds", "120000")
+  .option("--reviewer-concurrency <n>", "maximum concurrent external reviewers", "4")
+  .option("--reviewer-arg <arg>", "extra reviewer argument; repeat for multiple args", collectOption, [])
+  .option("--codex-command <path>", "deprecated alias for --reviewer-command with --strategy codex")
+  .option("--codex-model <name>", "deprecated alias for --reviewer-model with --strategy codex")
+  .option("--codex-timeout-ms <n>", "deprecated alias for --reviewer-timeout-ms")
+  .option("--codex-concurrency <n>", "deprecated alias for --reviewer-concurrency")
   .action(async (options: RunCommandOptions) => {
     await runCommand(async () => {
       const source = resolvePath(options.source);
@@ -216,7 +227,7 @@ program
         throw new Error("--max-iterations must be a positive integer");
       }
       const projectContext = await readProjectContext(options.context);
-      if (options.strategy !== "codex" && options.strategy !== "local") {
+      if (options.strategy !== "local" && !isReviewerStrategy(options.strategy)) {
         unsupportedStrategy(options.strategy);
       }
       await runConvergence({
@@ -225,7 +236,7 @@ program
         maxIterations,
         strategy: options.strategy,
         ...(projectContext === undefined ? {} : { projectContext }),
-        codex: codexOptions(options),
+        reviewer: reviewerOptions(options),
       });
     });
   });
@@ -238,10 +249,15 @@ type ReviewCommandOptions = {
   context?: string;
   jobs?: string;
   strategy: string;
-  codexCommand: string;
+  reviewerCommand?: string;
+  reviewerModel?: string;
+  reviewerTimeoutMs?: string;
+  reviewerConcurrency?: string;
+  reviewerArg?: string[];
+  codexCommand?: string;
   codexModel?: string;
-  codexTimeoutMs: string;
-  codexConcurrency: string;
+  codexTimeoutMs?: string;
+  codexConcurrency?: string;
 };
 
 type RunCommandOptions = {
@@ -250,34 +266,65 @@ type RunCommandOptions = {
   context?: string;
   maxIterations: string;
   strategy: string;
-  codexCommand: string;
+  reviewerCommand?: string;
+  reviewerModel?: string;
+  reviewerTimeoutMs?: string;
+  reviewerConcurrency?: string;
+  reviewerArg?: string[];
+  codexCommand?: string;
   codexModel?: string;
-  codexTimeoutMs: string;
-  codexConcurrency: string;
+  codexTimeoutMs?: string;
+  codexConcurrency?: string;
 };
 
-function codexOptions(
-  options: Pick<ReviewCommandOptions, "codexCommand" | "codexModel" | "codexTimeoutMs" | "codexConcurrency">,
-): {
-  command: string;
+type ReviewerCommandOptions = Pick<
+  ReviewCommandOptions,
+  | "strategy"
+  | "reviewerCommand"
+  | "reviewerModel"
+  | "reviewerTimeoutMs"
+  | "reviewerConcurrency"
+  | "reviewerArg"
+  | "codexCommand"
+  | "codexModel"
+  | "codexTimeoutMs"
+  | "codexConcurrency"
+>;
+
+function reviewerOptions(options: ReviewerCommandOptions): {
+  command?: string;
+  args?: string[];
   model?: string;
   timeoutMs: number;
   concurrency: number;
 } {
-  const timeoutMs = Number.parseInt(options.codexTimeoutMs, 10);
+  const timeoutRaw = options.reviewerTimeoutMs ?? options.codexTimeoutMs ?? "120000";
+  const timeoutMs = Number.parseInt(timeoutRaw, 10);
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1) {
-    throw new Error("--codex-timeout-ms must be a positive integer");
+    throw new Error("--reviewer-timeout-ms must be a positive integer");
   }
-  const concurrency = Number.parseInt(options.codexConcurrency, 10);
+  const concurrencyRaw = options.reviewerConcurrency ?? options.codexConcurrency ?? "4";
+  const concurrency = Number.parseInt(concurrencyRaw, 10);
   if (!Number.isInteger(concurrency) || concurrency < 1) {
-    throw new Error("--codex-concurrency must be a positive integer");
+    throw new Error("--reviewer-concurrency must be a positive integer");
   }
+  const command = options.reviewerCommand ?? options.codexCommand;
+  const model = options.reviewerModel ?? options.codexModel;
   return {
-    command: options.codexCommand,
-    ...(options.codexModel ? { model: options.codexModel } : {}),
+    ...(command ? { command } : {}),
+    ...(options.reviewerArg && options.reviewerArg.length > 0 ? { args: options.reviewerArg } : {}),
+    ...(model ? { model } : {}),
     timeoutMs,
     concurrency,
   };
+}
+
+function collectOption(value: string, previous: string[]): string[] {
+  return [...previous, value];
+}
+
+function isReviewerStrategy(strategy: string): strategy is ReviewerStrategy {
+  return strategy === "codex" || strategy === "pi" || strategy === "command";
 }
 
 function unsupportedStrategy(strategy: string): never {

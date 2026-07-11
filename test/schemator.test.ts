@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
 import { aggregateReviews } from "../src/aggregate.js";
 import { renderPatchPlan } from "../src/apply.js";
-import { writeCodexReviews } from "../src/codex-review.js";
+import { writeCodexReviews, writeReviewerReviews } from "../src/codex-review.js";
 import { extractGraph } from "../src/extract/index.js";
 import { pathToFileNamePart } from "../src/files.js";
 import { applyAggregateToGraph, graphDecisionKey, hasGraphChange, hasSimplification, reduceAggregateGraph } from "../src/graph.js";
@@ -60,6 +60,77 @@ describe("schemator", () => {
         expect(graph.models.map((model) => model.id)).toEqual(["Policy"]);
         expect(graph.models[0]?.fields.map((field) => field.path)).toEqual(["id"]);
       }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("extracts SQL create table columns", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "schemator-"));
+    try {
+      const source = join(dir, "schema.sql");
+      await writeFile(
+        source,
+        [
+          "CREATE TABLE public.customer_accounts (",
+          "  id uuid PRIMARY KEY,",
+          "  display_name text NOT NULL,",
+          "  billing_email text,",
+          "  marketing_email_opt_in boolean DEFAULT false,",
+          "  created_at timestamptz NOT NULL,",
+          "  CONSTRAINT customer_accounts_email_check CHECK (billing_email <> '')",
+          ");",
+        ].join("\n"),
+      );
+
+      const graph = await extractGraph(source);
+
+      expect(graph.models.map((model) => model.id)).toEqual(["customer_accounts"]);
+      expect(graph.models[0]?.kind).toBe("table");
+      expect(graph.models[0]?.fields.map((field) => field.path)).toEqual([
+        "id",
+        "display_name",
+        "billing_email",
+        "marketing_email_opt_in",
+        "created_at",
+      ]);
+      expect(graph.models[0]?.fields.find((field) => field.path === "id")?.required).toBe(true);
+      expect(graph.models[0]?.fields.find((field) => field.path === "id")?.source.span.startLine).toBe(2);
+      expect(graph.models[0]?.fields.find((field) => field.path === "billing_email")?.required).toBe(false);
+      expect(graph.models[0]?.fields.find((field) => field.path === "billing_email")?.source.span.startLine).toBe(4);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("skips MySQL INDEX, FULLTEXT KEY, and SPATIAL INDEX table definitions", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "schemator-"));
+    try {
+      const source = join(dir, "schema.sql");
+      await writeFile(
+        source,
+        [
+          "CREATE TABLE articles (",
+          "  id int PRIMARY KEY,",
+          "  title varchar(255) NOT NULL,",
+          "  body text,",
+          "  location point,",
+          "  INDEX idx_email (email),",
+          "  FULLTEXT KEY idx_body (body),",
+          "  SPATIAL INDEX idx_location (location)",
+          ");",
+        ].join("\n"),
+      );
+
+      const graph = await extractGraph(source);
+
+      expect(graph.models.map((model) => model.id)).toEqual(["articles"]);
+      expect(graph.models[0]?.fields.map((field) => field.path)).toEqual([
+        "id",
+        "title",
+        "body",
+        "location",
+      ]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -141,6 +212,61 @@ describe("schemator", () => {
         "promptRecipe",
         "contextPosture",
       ]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("extracts SQL create table columns around comments", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "schemator-"));
+    try {
+      const source = join(dir, "schema.sql");
+      await writeFile(
+        source,
+        [
+          "-- leading comment with ;",
+          "CREATE TABLE account_events (",
+          "  id uuid PRIMARY KEY, -- comma, paren ) in comment",
+          "  account_id uuid NOT NULL,",
+          "  /* comma, and paren ) in block comment */",
+          "  event_type text NOT NULL",
+          ");",
+        ].join("\n"),
+      );
+
+      const graph = await extractGraph(source);
+
+      expect(graph.models.map((model) => model.id)).toEqual(["account_events"]);
+      expect(graph.models[0]?.source.span.startLine).toBe(2);
+      expect(graph.models[0]?.fields.map((field) => field.path)).toEqual(["id", "account_id", "event_type"]);
+      expect(graph.models[0]?.fields.find((field) => field.path === "id")?.source.span.startLine).toBe(3);
+      expect(graph.models[0]?.fields.find((field) => field.path === "event_type")?.source.span.startLine).toBe(6);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("extracts SQL fences from Markdown proposals", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "schemator-"));
+    try {
+      const source = join(dir, "proposal.md");
+      await writeFile(
+        source,
+        [
+          "```sql",
+          "CREATE TABLE account_events (",
+          "  id uuid PRIMARY KEY,",
+          "  account_id uuid NOT NULL,",
+          "  event_type text NOT NULL",
+          ");",
+          "```",
+        ].join("\n"),
+      );
+
+      const graph = await extractGraph(source);
+
+      expect(graph.models.map((model) => model.id)).toEqual(["account_events"]);
+      expect(graph.models[0]?.fields.map((field) => field.path)).toEqual(["id", "account_id", "event_type"]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -229,6 +355,133 @@ describe("schemator", () => {
       expect(reviews.find((review) => review.fieldPath === "extends")?.finalName).toBe("extends");
       expect(reviews[0]).not.toHaveProperty("ownerBoundary");
       expect(reviewFiles).toHaveLength(2);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("runs command review strategy through a stdin reviewer", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "schemator-"));
+    try {
+      const fakeReviewer = join(dir, "fake-reviewer.js");
+      const promptPath = join(dir, "prompt.txt");
+      const reviewsDir = join(dir, "reviews");
+      await writeFile(
+        fakeReviewer,
+        [
+          "#!/usr/bin/env node",
+          "const fs = require('fs');",
+          "let prompt = '';",
+          "process.stdin.setEncoding('utf8');",
+          "process.stdin.on('data', (chunk) => { prompt += chunk; });",
+          "process.stdin.on('end', () => {",
+          "  fs.writeFileSync(process.env.SCHEMATOR_PROMPT_PATH, prompt);",
+          "  console.log(JSON.stringify({",
+          "    schemaVersion: 1,",
+          "    model: 'Policy',",
+          "    fieldPath: 'id',",
+          "    decision: 'keep',",
+          "    finalName: 'id',",
+          "    finalType: 'string',",
+          "    required: true,",
+          "    rationale: 'test',",
+          "    alternatives: ['id'],",
+          "    simplestChoice: 'id',",
+          "    confidence: 'high',",
+          "    questions: []",
+          "  }));",
+          "});",
+        ].join("\n"),
+      );
+      await chmod(fakeReviewer, 0o755);
+      const originalPromptPath = process.env["SCHEMATOR_PROMPT_PATH"];
+      process.env["SCHEMATOR_PROMPT_PATH"] = promptPath;
+      try {
+        const reviews = await writeReviewerReviews(graphWithOneField("Policy", "id", "id"), reviewsDir, {
+          strategy: "command",
+          command: fakeReviewer,
+          timeoutMs: 5_000,
+        });
+        const prompt = await readFile(promptPath, "utf8");
+
+        expect(reviews[0]?.decision).toBe("keep");
+        expect(prompt).toContain("# Schemator Field Review");
+        expect(prompt).toContain("Allowed `decision` values");
+      } finally {
+        if (originalPromptPath === undefined) {
+          delete process.env["SCHEMATOR_PROMPT_PATH"];
+        } else {
+          process.env["SCHEMATOR_PROMPT_PATH"] = originalPromptPath;
+        }
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("runs pi review strategy with model and extra args", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "schemator-"));
+    try {
+      const fakePi = join(dir, "fake-pi.js");
+      const argsPath = join(dir, "args.json");
+      const reviewsDir = join(dir, "reviews");
+      await writeFile(
+        fakePi,
+        [
+          "#!/usr/bin/env node",
+          "const fs = require('fs');",
+          "fs.writeFileSync(process.env.SCHEMATOR_ARGS_PATH, JSON.stringify(process.argv.slice(2)));",
+          "console.log(JSON.stringify({",
+          "  schemaVersion: 1,",
+          "  model: 'Policy',",
+          "  fieldPath: 'id',",
+          "  decision: 'keep',",
+          "  finalName: 'id',",
+          "  finalType: 'string',",
+          "  required: true,",
+          "  rationale: 'test',",
+          "  alternatives: ['id'],",
+          "  simplestChoice: 'id',",
+          "  confidence: 'high',",
+          "  questions: []",
+          "}));",
+        ].join("\n"),
+      );
+      await chmod(fakePi, 0o755);
+      const originalArgsPath = process.env["SCHEMATOR_ARGS_PATH"];
+      process.env["SCHEMATOR_ARGS_PATH"] = argsPath;
+      try {
+        await writeReviewerReviews(graphWithOneField("Policy", "id", "id"), reviewsDir, {
+          strategy: "pi",
+          command: fakePi,
+          model: "claude-bridge/claude-sonnet-4-6",
+          args: ["--thinking", "off"],
+          timeoutMs: 5_000,
+        });
+        const args = JSON.parse(await readFile(argsPath, "utf8")) as string[];
+
+        expect(args.slice(0, 9)).toEqual([
+          "--print",
+          "--no-session",
+          "--source",
+          "child-agent",
+          "--no-tools",
+          "--no-context-files",
+          "--no-skills",
+          "--mode",
+          "text",
+        ]);
+        expect(args).toContain("--model");
+        expect(args).toContain("claude-bridge/claude-sonnet-4-6");
+        expect(args).toContain("--thinking");
+        expect(args.at(-1)).toContain("# Schemator Field Review");
+      } finally {
+        if (originalArgsPath === undefined) {
+          delete process.env["SCHEMATOR_ARGS_PATH"];
+        } else {
+          process.env["SCHEMATOR_ARGS_PATH"] = originalArgsPath;
+        }
+      }
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

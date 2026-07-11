@@ -6,6 +6,7 @@ import { fencedCodeBlocks } from "../markdown.js";
 import type { ModelGraph, ModelNode, SourceSpan } from "../types.js";
 import { extractJsonSchemaModel } from "./json-schema.js";
 import { extractObjectModel, modelIdForObject } from "./object.js";
+import { extractSqlModels } from "./sql.js";
 import { collectTypeScriptObjectModelNames, extractTypeScriptModels } from "./typescript.js";
 
 type JsonSourceFileWithDiagnostics = ts.JsonSourceFile & {
@@ -59,6 +60,9 @@ function extractDirectModels(
     const parsed = parseYaml(text) as unknown;
     return [jsonLikeToModel(parsed, "YamlDocument", source)];
   }
+  if (extension === ".sql") {
+    return extractSqlModels(text, sourcePath);
+  }
   return [];
 }
 
@@ -107,6 +111,10 @@ function extractMarkdownModels(text: string, sourcePath: string): ModelNode[] {
       const parsed = parseYaml(block.code) as unknown;
       yamlIndex += 1;
       models.push(jsonLikeToModel(parsed, `YamlBlock${yamlIndex}`, source));
+      continue;
+    }
+    if (block.language === "sql") {
+      models.push(...extractSqlModels(block.code, sourcePath, block.startLine));
     }
   }
   return models.filter((model) => model.fields.length > 0);

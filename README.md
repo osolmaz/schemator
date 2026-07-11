@@ -69,6 +69,28 @@ naming constraints before applying schema changes.
 per field, validates each JSON result, aggregates the decisions, and applies
 safe changes.
 
+Schemator can also use another agent runtime:
+
+```bash
+schemator run --strategy pi --reviewer-model claude-bridge/claude-sonnet-4-6 --source schema.md --context project-context.md --out .schemator
+schemator run --strategy pi --reviewer-model openai/gpt-5.1 --reviewer-arg=--thinking --reviewer-arg off --source schema.md --out .schemator
+```
+
+Use `command` for any CLI that reads the field-review prompt from stdin and
+prints one field-review JSON object to stdout:
+
+```bash
+schemator review --strategy command --reviewer-command ./review-field --graph .schemator/graph.iteration-1.json --out .schemator/reviews.iteration-1
+```
+
+Shared reviewer options:
+
+- `--reviewer-command <path>`: executable for `codex`, `pi`, or `command`.
+- `--reviewer-model <name>`: provider/model passed to the reviewer when supported.
+- `--reviewer-timeout-ms <n>`: per-field timeout.
+- `--reviewer-concurrency <n>`: maximum concurrent external reviewers.
+- `--reviewer-arg <arg>`: extra reviewer argument; repeat for multiple args. Use `--reviewer-arg=--flag` when the value itself starts with `--`.
+
 Use local mode only for smoke tests:
 
 ```bash

@@ -1,71 +1,92 @@
 ---
 name: schemator
-description: Use when running Schemator to extract, review, simplify, converge, diff, or report on data models, JSON schemas, API payloads, SQL tables, migrations, TypeScript interfaces, YAML resources, or other field-based schemas.
+description: "Use when running Schemator to extract, review, simplify, converge, diff, or report on database schemas, ORM models, migrations, API payloads, JSON Schema, TypeScript interfaces, YAML resources, or other field-based data models."
 ---
 
 # Schemator
 
-Use this skill when a task asks to run or interpret Schemator, improve a schema
-with Schemator, inspect Schemator artifacts, or prepare a Schemator-backed
-schema report.
+Use Schemator as a schema-design reviewer: it extracts fields from an existing
+schema/proposal, asks reviewers to challenge each field, applies safe reductions,
+and reports the resulting graph. It is a design aid, not product truth.
 
 ## Workflow
 
-1. Start from a real draft schema or proposal. Schemator reviews existing model
-   shapes; it does not invent the first draft.
-2. Write or locate project/task context before review. Context should explain
-   the product goal, naming conventions, borrowed vocabulary, user-facing
-   constraints, and what should remain stable.
-3. Run real Codex review for semantic decisions. Use the local strategy only
-   for smoke tests and plumbing checks.
-4. Inspect generated prompts under `jobs.iteration-N/` when decisions look
-   wrong. Verify the expected context is actually injected.
-5. Read reduction artifacts, not just aggregate totals. Applied changes,
-   skipped proposals, manual proposals, and consistency warnings have different
-   meanings.
-6. Treat a converged run as a candidate, not automatic product truth. Do a
-   manual naming and product-semantics pass before accepting the final schema.
-7. For published or handoff reports, use the `final-report` skill too.
+1. Start from a real draft schema, model, migration, payload, or proposal.
+   Schemator reviews existing shapes; it does not invent the first draft.
+2. Locate the source shape and context:
+   - DB / ORM: migrations, SQL DDL, Prisma/Drizzle/TypeORM/SQLAlchemy/Rails/Laravel models.
+   - API / contract: OpenAPI snippets, JSON Schema, GraphQL types, protobuf, API payload examples.
+   - App model: TypeScript interfaces/types, Zod schemas, YAML/JSON resources, Markdown proposals.
+3. Write or locate project/task context before review. Good context explains the
+   product goal, naming conventions, borrowed vocabulary, user-facing fields,
+   compatibility constraints, and what must remain stable.
+4. Run a real reviewer for semantic decisions. Prefer `--strategy pi` in Luke's
+   Pi runtime, or `--strategy codex` when you specifically want Codex. Use
+   `--strategy local` only for smoke tests and plumbing checks.
+5. Inspect generated prompts under `jobs.iteration-N/` when decisions look wrong.
+   Verify the expected schema source and context are injected.
+6. Read reduction artifacts, not just aggregate totals. Applied changes, skipped
+   proposals, manual proposals, and consistency warnings mean different things.
+7. Treat convergence as a candidate schema. Do a manual naming, product-semantics,
+   and backwards-compatibility pass before accepting changes.
+8. For published or handoff reports, use the `schemator-final-report` skill too if installed.
 
 ## Commands
 
-End-to-end review:
+Pi runtime / provider-model selected from CLI:
 
 ```bash
-npm run dev -- run --source schema.md --context project-context.md --out .schemator
+schemator run --strategy pi --reviewer-model claude-bridge/claude-sonnet-4-6 --source schema.md --context project-context.md --out .schemator
+schemator run --strategy pi --reviewer-model openai/gpt-5.1 --reviewer-arg=--thinking --reviewer-arg off --source schema.md --out .schemator
 ```
 
-Write prompts without reviewing:
+Default Codex strategy:
 
 ```bash
-npm run dev -- create-jobs --graph .schemator/graph.iteration-1.json --context project-context.md --out .schemator/jobs.iteration-1
+schemator run --source schema.md --context project-context.md --out .schemator
+```
+
+Any command that reads the prompt from stdin and prints one field-review JSON object:
+
+```bash
+schemator review --strategy command --reviewer-command ./review-field --graph .schemator/graph.iteration-1.json --out .schemator/reviews.iteration-1
 ```
 
 Generate report and graph diff:
 
 ```bash
-npm run dev -- report --run .schemator --out .schemator/final-report.md
-npm run dev -- diff --run .schemator --out .schemator/graph-diff.md
+schemator report --run .schemator --out .schemator/final-report.md
+schemator diff --run .schemator --out .schemator/graph-diff.md
 ```
 
 Smoke test only:
 
 ```bash
-npm run dev -- run --strategy local --source schema.md --out .schemator-smoke
+schemator run --strategy local --source schema.md --out .schemator-smoke
 ```
+
+Reviewer knobs:
+
+- `--reviewer-command <path>` sets the executable for `codex`, `pi`, or `command`.
+- `--reviewer-model <name>` passes a provider/model to the reviewer when supported.
+- `--reviewer-timeout-ms <n>` sets the per-field timeout.
+- `--reviewer-concurrency <n>` sets max concurrent external reviewers.
+- `--reviewer-arg <arg>` adds extra reviewer args; use `--reviewer-arg=--flag` for flag-looking values.
 
 ## Review Rules
 
 - Do not add local field-specific keep, rename, remove, merge, derive, or move
   rules unless the user explicitly asks for that exact field outcome.
-- Use project context to explain naming intent instead of hardcoding outcomes.
-- Preserve intentional declarative/configuration vocabulary when the context
-  says it is borrowed or meaningful.
-- Prefer short clear names. Do not accept longer explicit names unless they
-  prevent a real ambiguity.
+- Use context to explain naming/product intent instead of hardcoding outcomes.
+- Preserve intentional domain vocabulary when context says it is borrowed or stable.
+- Prefer short clear names. Accept longer explicit names only when they prevent
+  a real ambiguity.
 - Watch for renamed fields that became more verbose without improving the model.
+- For DB/ORM sources, flag compatibility risks separately: migrations, data
+  backfills, API clients, analytics, imports/exports, and generated code may all
+  depend on field names.
 - Check whether removals are missing because the run was partial, because the
-  field had a current use case, or because the reviewer lacked enough context.
+  field has a current use case, or because reviewers lacked enough context.
 
 ## Report Checklist
 
@@ -76,5 +97,5 @@ Before calling a Schemator result final:
 - Include the project context and command lines used.
 - Include applied, skipped, and manual decisions separately.
 - Include the initial-vs-final graph diff.
-- State manual corrections or naming overrides clearly.
-- Link the pushed artifact or PR.
+- State manual corrections, naming overrides, and compatibility concerns clearly.
+- Link the pushed artifact or PR when relevant.

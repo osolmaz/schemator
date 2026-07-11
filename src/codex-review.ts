@@ -6,8 +6,12 @@ import { renderFieldPrompt, type RunHistoryEntry } from "./jobs.js";
 import type { FieldReview, ModelGraph } from "./types.js";
 import { validateFieldReview } from "./validate.js";
 
-export type CodexReviewOptions = {
+export type ReviewerStrategy = "codex" | "pi" | "command";
+
+export type ReviewerOptions = {
+  strategy?: ReviewerStrategy;
   command?: string;
+  args?: string[];
   model?: string;
   cwd?: string;
   timeoutMs?: number;
@@ -16,12 +20,23 @@ export type CodexReviewOptions = {
   runHistory?: RunHistoryEntry[];
 };
 
+export type CodexReviewOptions = Omit<ReviewerOptions, "strategy" | "args">;
+
 export async function writeCodexReviews(
   graph: ModelGraph,
   outputDir: string,
   options: CodexReviewOptions = {},
 ): Promise<FieldReview[]> {
+  return writeReviewerReviews(graph, outputDir, { ...options, strategy: "codex" });
+}
+
+export async function writeReviewerReviews(
+  graph: ModelGraph,
+  outputDir: string,
+  options: ReviewerOptions = {},
+): Promise<FieldReview[]> {
   await prepareGeneratedOutputDir(outputDir, ".review.json");
+  const strategy = options.strategy ?? "codex";
   const jobs = graph.models.flatMap((model) => model.fields.map((field) => ({ model, field })));
   const reviews = new Array<FieldReview>(jobs.length);
   let cursor = 0;
@@ -48,14 +63,14 @@ export async function writeCodexReviews(
           },
         );
         const review = bindReviewIdentity(
-          await runCodexFieldReview(prompt, options, abortController.signal),
+          await runFieldReview(prompt, { ...options, strategy }, abortController.signal),
           model.id,
           field.path,
         );
         const validation = validateFieldReview(review);
         if (!validation.ok) {
           throw new Error(
-            `Codex review for ${model.id}.${field.path} is invalid:\n${validation.errors.join("\n")}`,
+            `${strategy} review for ${model.id}.${field.path} is invalid:\n${validation.errors.join("\n")}`,
           );
         }
         reviews[index] = review;
@@ -75,7 +90,7 @@ export async function writeCodexReviews(
   }
   for (const review of reviews) {
     if (!review) {
-      throw new Error("Codex review worker finished without writing every review.");
+      throw new Error(`${strategy} review worker finished without writing every review.`);
     }
   }
   return reviews;
@@ -89,11 +104,24 @@ function bindReviewIdentity(review: FieldReview, model: string, fieldPath: strin
   };
 }
 
-async function runCodexFieldReview(
+async function runFieldReview(
   prompt: string,
-  options: CodexReviewOptions,
+  options: ReviewerOptions & { strategy: ReviewerStrategy },
   signal?: AbortSignal,
 ): Promise<FieldReview> {
+  const output = options.strategy === "codex"
+    ? await runCodexFieldReview(prompt, options, signal)
+    : options.strategy === "pi"
+      ? await runPiFieldReview(prompt, options, signal)
+      : await runCommandFieldReview(prompt, options, signal);
+  return parseFieldReviewOutput(output, options.strategy);
+}
+
+async function runCodexFieldReview(
+  prompt: string,
+  options: ReviewerOptions,
+  signal?: AbortSignal,
+): Promise<string> {
   const command = options.command ?? "codex";
   const args = [
     "--ask-for-approval",
@@ -107,14 +135,57 @@ async function runCodexFieldReview(
     "--color",
     "never",
     ...(options.model ? ["--model", options.model] : []),
+    ...(options.args ?? []),
     "-",
   ];
-  const output = await execWithInput(command, args, prompt, {
+  return execWithInput(command, args, prompt, {
     cwd: options.cwd ?? process.cwd(),
     timeoutMs: options.timeoutMs ?? 120_000,
     ...(signal === undefined ? {} : { signal }),
   });
-  return parseFieldReviewOutput(output);
+}
+
+async function runPiFieldReview(
+  prompt: string,
+  options: ReviewerOptions,
+  signal?: AbortSignal,
+): Promise<string> {
+  const command = options.command ?? "pi";
+  const args = [
+    "--print",
+    "--no-session",
+    "--source",
+    "child-agent",
+    "--no-tools",
+    "--no-context-files",
+    "--no-skills",
+    "--mode",
+    "text",
+    ...(options.model ? ["--model", options.model] : []),
+    ...(options.args ?? []),
+    prompt,
+  ];
+  return execWithInput(command, args, "", {
+    cwd: options.cwd ?? process.cwd(),
+    timeoutMs: options.timeoutMs ?? 120_000,
+    ...(signal === undefined ? {} : { signal }),
+  });
+}
+
+async function runCommandFieldReview(
+  prompt: string,
+  options: ReviewerOptions,
+  signal?: AbortSignal,
+): Promise<string> {
+  const command = options.command;
+  if (!command) {
+    throw new Error("--reviewer-command is required for --strategy command");
+  }
+  return execWithInput(command, options.args ?? [], prompt, {
+    cwd: options.cwd ?? process.cwd(),
+    timeoutMs: options.timeoutMs ?? 120_000,
+    ...(signal === undefined ? {} : { signal }),
+  });
 }
 
 function fieldReviewSchemaPath(): string {
@@ -191,7 +262,7 @@ function execWithInput(
   });
 }
 
-function parseFieldReviewOutput(output: string): FieldReview {
+function parseFieldReviewOutput(output: string, strategy: string): FieldReview {
   const trimmed = output.trim();
   const direct = tryParseJson(trimmed);
   if (direct) {
@@ -210,7 +281,7 @@ function parseFieldReviewOutput(output: string): FieldReview {
     return normalizeFieldReview(objectJson);
   }
 
-  throw new Error("Codex review did not return a JSON object");
+  throw new Error(`${strategy} review did not return a JSON object`);
 }
 
 function normalizeFieldReview(value: unknown): FieldReview {
