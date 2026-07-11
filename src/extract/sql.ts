@@ -20,6 +20,9 @@ const tableConstraintKeywords = new Set([
   "check",
   "exclude",
   "key",
+  "index",
+  "fulltext",
+  "spatial",
 ]);
 
 const columnConstraintKeywords = new Set([

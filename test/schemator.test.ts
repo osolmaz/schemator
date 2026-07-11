@@ -103,6 +103,39 @@ describe("schemator", () => {
     }
   });
 
+  test("skips MySQL INDEX, FULLTEXT KEY, and SPATIAL INDEX table definitions", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "schemator-"));
+    try {
+      const source = join(dir, "schema.sql");
+      await writeFile(
+        source,
+        [
+          "CREATE TABLE articles (",
+          "  id int PRIMARY KEY,",
+          "  title varchar(255) NOT NULL,",
+          "  body text,",
+          "  location point,",
+          "  INDEX idx_email (email),",
+          "  FULLTEXT KEY idx_body (body),",
+          "  SPATIAL INDEX idx_location (location)",
+          ");",
+        ].join("\n"),
+      );
+
+      const graph = await extractGraph(source);
+
+      expect(graph.models.map((model) => model.id)).toEqual(["articles"]);
+      expect(graph.models[0]?.fields.map((field) => field.path)).toEqual([
+        "id",
+        "title",
+        "body",
+        "location",
+      ]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test("merges duplicate TypeScript model declarations inside Markdown", async () => {
     const dir = await mkdtemp(join(tmpdir(), "schemator-"));
     try {
