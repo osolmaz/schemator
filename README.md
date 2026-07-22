@@ -17,7 +17,7 @@ npm install -g @dutifuldev/schemator
 Or use a local checkout:
 
 ```bash
-git clone https://github.com/dutifuldev/schemator.git
+git clone https://github.com/osolmaz/schemator.git
 cd schemator
 npm install
 ```
@@ -56,7 +56,7 @@ review a data model with Schemator.
 Use Schemator to review and simplify this project's data model.
 
 Attention agent: start with this file before changing files:
-https://raw.githubusercontent.com/dutifuldev/schemator/refs/heads/main/docs/AGENT_ENTRYPOINT.md
+https://raw.githubusercontent.com/osolmaz/schemator/refs/heads/main/docs/AGENT_ENTRYPOINT.md
 
 Follow it exactly. Inspect the existing schema or proposal, run Schemator,
 review the report and diff, and ask only for missing product semantics or
@@ -111,7 +111,7 @@ Do a manual naming and product-semantics pass before accepting the final model.
 
 ## Bundled Agent Skills
 
-Schemator exposes its agent skills through [Skillflag](https://github.com/dutifuldev/skillflag):
+Schemator exposes its agent skills through [Skillflag](https://github.com/osolmaz/skillflag):
 
 ```bash
 schemator --skill list

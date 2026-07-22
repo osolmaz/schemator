@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://dutifuldev.github.io/schemator/schemas/field-review.schema.json",
+  "$id": "https://osolmaz.github.io/schemator/schemas/field-review.schema.json",
   "type": "object",
   "additionalProperties": false,
   "required": [

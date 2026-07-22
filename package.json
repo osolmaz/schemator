@@ -9,12 +9,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dutifuldev/schemator.git"
+    "url": "git+https://github.com/osolmaz/schemator.git"
   },
   "bugs": {
-    "url": "https://github.com/dutifuldev/schemator/issues"
+    "url": "https://github.com/osolmaz/schemator/issues"
   },
-  "homepage": "https://github.com/dutifuldev/schemator#readme",
+  "homepage": "https://github.com/osolmaz/schemator#readme",
   "keywords": [
     "schema",
     "data-model",
