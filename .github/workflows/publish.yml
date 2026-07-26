@@ -55,6 +55,7 @@ jobs:
           }
           NODE
       - name: Validate release
+        id: release
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -71,8 +72,11 @@ jobs:
             exit 1
           fi
           if npm view "@osolmaz/schemator@$version" version >/dev/null 2>&1; then
-            echo "@osolmaz/schemator@$version is already published" >&2
-            exit 1
+            echo "@osolmaz/schemator@$version is already published; skipping upload"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
       - run: npm run check
-      - run: npm publish --access public --provenance
+      - if: steps.release.outputs.publish == 'true'
+        run: npm publish --access public --provenance
