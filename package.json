@@ -1,6 +1,6 @@
 {
-  "name": "@dutifuldev/schemator",
-  "version": "0.1.0",
+  "name": "@osolmaz/schemator",
+  "version": "0.1.1",
   "description": "Schema and data-model review CLI for agents.",
   "license": "MIT",
   "type": "module",

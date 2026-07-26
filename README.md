@@ -11,7 +11,7 @@ each field, applies safe reductions, and repeats until the model stabilizes.
 Install the published package:
 
 ```bash
-npm install -g @dutifuldev/schemator
+npm install -g @osolmaz/schemator
 ```
 
 Or use a local checkout:
@@ -126,7 +126,7 @@ Bundled skills:
 
 ## More
 
-- [npm package](https://www.npmjs.com/package/@dutifuldev/schemator)
+- [npm package](https://www.npmjs.com/package/@osolmaz/schemator)
 
 ## License
 
