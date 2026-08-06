@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
 import { aggregateReviews } from "../src/aggregate.js";
 import { renderPatchPlan } from "../src/apply.js";
-import { writeCodexReviews } from "../src/codex-review.js";
+import { writePiReviews } from "../src/pi-review.js";
 import { extractGraph } from "../src/extract/index.js";
 import { pathToFileNamePart } from "../src/files.js";
 import { applyAggregateToGraph, graphDecisionKey, hasGraphChange, hasSimplification, reduceAggregateGraph } from "../src/graph.js";
@@ -179,12 +179,12 @@ describe("schemator", () => {
     }
   });
 
-  test("runs codex review strategy through one external reviewer per field", async () => {
+  test("runs pi review strategy through one external reviewer per field", async () => {
     const dir = await mkdtemp(join(tmpdir(), "schemator-"));
     try {
-      const fakeCodex = join(dir, "fake-codex.js");
+      const fakePi = join(dir, "fake-pi.js");
       const reviewsDir = join(dir, "reviews");
-      await writeFakeModelReviewer(fakeCodex);
+      await writeFakeModelReviewer(fakePi);
       const graph: ModelGraph = {
         schemaVersion: 1,
         source: { path: "schema.ts", revision: null },
@@ -219,7 +219,7 @@ describe("schemator", () => {
         ],
       };
 
-      const reviews = await writeCodexReviews(graph, reviewsDir, { command: fakeCodex, timeoutMs: 5_000 });
+      const reviews = await writePiReviews(graph, reviewsDir, { command: fakePi, timeoutMs: 5_000 });
       const reviewFiles = await readdirFileNames(reviewsDir);
 
       expect(reviews).toHaveLength(2);
@@ -234,13 +234,13 @@ describe("schemator", () => {
     }
   });
 
-  test("binds Codex review identity to the reviewed field", async () => {
+  test("binds Pi review identity to the reviewed field", async () => {
     const dir = await mkdtemp(join(tmpdir(), "schemator-"));
     try {
-      const fakeCodex = join(dir, "fake-codex.js");
+      const fakePi = join(dir, "fake-pi.js");
       const reviewsDir = join(dir, "reviews");
       await writeFile(
-        fakeCodex,
+        fakePi,
         [
           "#!/usr/bin/env node",
           "console.log(JSON.stringify({",
@@ -259,10 +259,10 @@ describe("schemator", () => {
           "}));",
         ].join("\n"),
       );
-      await chmod(fakeCodex, 0o755);
+      await chmod(fakePi, 0o755);
       const graph = graphWithOneField("Policy", "id", "id");
 
-      const reviews = await writeCodexReviews(graph, reviewsDir, { command: fakeCodex, timeoutMs: 5_000 });
+      const reviews = await writePiReviews(graph, reviewsDir, { command: fakePi, timeoutMs: 5_000 });
       const reviewFiles = await readdirFileNames(reviewsDir);
       const written = JSON.parse(await readFile(join(reviewsDir, reviewFiles[0] ?? ""), "utf8")) as {
         model: string;
@@ -400,13 +400,13 @@ describe("schemator", () => {
     expect(prompt).toContain("  - `name`: `string`");
   });
 
-  test("passes project context through the Codex review adapter", async () => {
+  test("passes project context through the Pi review adapter", async () => {
     const dir = await mkdtemp(join(tmpdir(), "schemator-"));
     try {
-      const fakeCodex = join(dir, "fake-codex.js");
+      const fakePi = join(dir, "fake-pi.js");
       const reviewsDir = join(dir, "reviews");
       await writeFile(
-        fakeCodex,
+        fakePi,
         [
           "#!/usr/bin/env node",
           "let prompt = '';",
@@ -439,11 +439,11 @@ describe("schemator", () => {
           "});",
         ].join("\n"),
       );
-      await chmod(fakeCodex, 0o755);
+      await chmod(fakePi, 0o755);
       const graph = graphWithOneField("Policy", "id", "id");
 
-      const reviews = await writeCodexReviews(graph, reviewsDir, {
-        command: fakeCodex,
+      const reviews = await writePiReviews(graph, reviewsDir, {
+        command: fakePi,
         timeoutMs: 5_000,
         projectContext: "Profiles may be optimized with GEPA.",
       });
@@ -455,13 +455,13 @@ describe("schemator", () => {
     }
   });
 
-  test("passes accepted run decisions through the Codex review adapter", async () => {
+  test("passes accepted run decisions through the Pi review adapter", async () => {
     const dir = await mkdtemp(join(tmpdir(), "schemator-"));
     try {
-      const fakeCodex = join(dir, "fake-codex.js");
+      const fakePi = join(dir, "fake-pi.js");
       const reviewsDir = join(dir, "reviews");
       await writeFile(
-        fakeCodex,
+        fakePi,
         [
           "#!/usr/bin/env node",
           "let prompt = '';",
@@ -494,11 +494,11 @@ describe("schemator", () => {
           "});",
         ].join("\n"),
       );
-      await chmod(fakeCodex, 0o755);
+      await chmod(fakePi, 0o755);
       const graph = graphWithOneField("Policy", "systemPromptVariant", "systemPromptVariant");
 
-      const reviews = await writeCodexReviews(graph, reviewsDir, {
-        command: fakeCodex,
+      const reviews = await writePiReviews(graph, reviewsDir, {
+        command: fakePi,
         timeoutMs: 5_000,
         runHistory: [
           {
@@ -517,18 +517,18 @@ describe("schemator", () => {
     }
   });
 
-  test("cancels in-flight Codex reviewers after a worker failure", async () => {
+  test("cancels in-flight Pi reviewers after a worker failure", async () => {
     const dir = await mkdtemp(join(tmpdir(), "schemator-"));
     try {
-      const fakeCodex = join(dir, "cancellable-codex.js");
+      const fakePi = join(dir, "cancellable-pi.js");
       const logPath = join(dir, "events.log");
       const reviewsDir = join(dir, "reviews");
       await writeFile(
-        fakeCodex,
+        fakePi,
         [
           "#!/usr/bin/env node",
           "const fs = require('fs');",
-          "const logPath = process.env.SCHEMATOR_FAKE_CODEX_LOG;",
+          "const logPath = process.env.SCHEMATOR_FAKE_PI_LOG;",
           "let prompt = '';",
           "process.stdin.setEncoding('utf8');",
           "process.stdin.on('data', (chunk) => { prompt += chunk; });",
@@ -567,7 +567,7 @@ describe("schemator", () => {
           "});",
         ].join("\n"),
       );
-      await chmod(fakeCodex, 0o755);
+      await chmod(fakePi, 0o755);
       const graph: ModelGraph = {
         schemaVersion: 1,
         source: { path: "schema.ts", revision: null },
@@ -583,21 +583,21 @@ describe("schemator", () => {
           },
         ],
       };
-      const originalLog = process.env["SCHEMATOR_FAKE_CODEX_LOG"];
-      process.env["SCHEMATOR_FAKE_CODEX_LOG"] = logPath;
+      const originalLog = process.env["SCHEMATOR_FAKE_PI_LOG"];
+      process.env["SCHEMATOR_FAKE_PI_LOG"] = logPath;
       try {
         await expect(
-          writeCodexReviews(graph, reviewsDir, {
-            command: fakeCodex,
+          writePiReviews(graph, reviewsDir, {
+            command: fakePi,
             timeoutMs: 5_000,
             concurrency: 2,
           }),
         ).rejects.toThrow(/exited with 1|aborted/);
       } finally {
         if (originalLog === undefined) {
-          delete process.env["SCHEMATOR_FAKE_CODEX_LOG"];
+          delete process.env["SCHEMATOR_FAKE_PI_LOG"];
         } else {
-          process.env["SCHEMATOR_FAKE_CODEX_LOG"] = originalLog;
+          process.env["SCHEMATOR_FAKE_PI_LOG"] = originalLog;
         }
       }
 
@@ -4430,11 +4430,11 @@ describe("schemator", () => {
       const source = join(dir, "schema.ts");
       const runDir = join(dir, "run");
       const reportPath = join(runDir, "report.md");
-      const fakeCodex = join(dir, "fake-codex.js");
-      await writeFakeModelReviewer(fakeCodex);
+      const fakePi = join(dir, "fake-pi.js");
+      await writeFakeModelReviewer(fakePi);
       await writeFile(source, "type T = { promptRecipe: string };\n");
 
-      await execFileAsync(tsxBin(), ["src/cli.ts", "run", "--source", source, "--out", runDir, "--codex-command", fakeCodex], {
+      await execFileAsync(tsxBin(), ["src/cli.ts", "run", "--source", source, "--out", runDir, "--pi-command", fakePi], {
         cwd: process.cwd(),
       });
       await execFileAsync(tsxBin(), ["src/cli.ts", "report", "--run", runDir, "--out", reportPath], {
@@ -4485,11 +4485,11 @@ describe("schemator", () => {
       const source = join(dir, "schema.ts");
       const runDir = join(dir, "run");
       const diffPath = join(runDir, "diff.md");
-      const fakeCodex = join(dir, "fake-codex.js");
-      await writeFakeModelReviewer(fakeCodex);
+      const fakePi = join(dir, "fake-pi.js");
+      await writeFakeModelReviewer(fakePi);
       await writeFile(source, "type T = { promptRecipe: string };\n");
 
-      await execFileAsync(tsxBin(), ["src/cli.ts", "run", "--source", source, "--out", runDir, "--codex-command", fakeCodex], {
+      await execFileAsync(tsxBin(), ["src/cli.ts", "run", "--source", source, "--out", runDir, "--pi-command", fakePi], {
         cwd: process.cwd(),
       });
       await execFileAsync(tsxBin(), ["src/cli.ts", "diff", "--run", runDir, "--out", diffPath], {
@@ -4628,8 +4628,8 @@ describe("schemator", () => {
     try {
       const source = join(dir, "schema.ts");
       const runDir = join(dir, "run");
-      const fakeCodex = join(dir, "fake-codex.js");
-      await writeFakeModelReviewer(fakeCodex);
+      const fakePi = join(dir, "fake-pi.js");
+      await writeFakeModelReviewer(fakePi);
       await writeFile(source, ["type ModelProfilePolicy = {", "  promptRecipe?: string;", "};"].join("\n"));
 
       await expect(
@@ -4642,8 +4642,8 @@ describe("schemator", () => {
           runDir,
           "--max-iterations",
           "1",
-          "--codex-command",
-          fakeCodex,
+          "--pi-command",
+          fakePi,
         ], {
           cwd: process.cwd(),
         }),
@@ -4659,8 +4659,8 @@ describe("schemator", () => {
     try {
       const source = join(dir, "schema.ts");
       const runDir = join(dir, "run");
-      const fakeCodex = join(dir, "oscillating-codex.js");
-      await writeOscillatingRenameReviewer(fakeCodex);
+      const fakePi = join(dir, "oscillating-pi.js");
+      await writeOscillatingRenameReviewer(fakePi);
       await writeFile(source, "type Policy = { promptRecipe?: string };\n");
 
       await execFileAsync(tsxBin(), [
@@ -4672,8 +4672,8 @@ describe("schemator", () => {
         runDir,
         "--max-iterations",
         "3",
-        "--codex-command",
-        fakeCodex,
+        "--pi-command",
+        fakePi,
       ], {
         cwd: process.cwd(),
       });
@@ -4709,8 +4709,8 @@ describe("schemator", () => {
     try {
       const source = join(dir, "schema.ts");
       const runDir = join(dir, "run");
-      const fakeCodex = join(dir, "parent-rebase-codex.js");
-      await writeParentRebaseReviewer(fakeCodex);
+      const fakePi = join(dir, "parent-rebase-pi.js");
+      await writeParentRebaseReviewer(fakePi);
       await writeFile(source, "type Policy = { config: { recipe?: string } };\n");
 
       await execFileAsync(tsxBin(), [
@@ -4722,8 +4722,8 @@ describe("schemator", () => {
         runDir,
         "--max-iterations",
         "4",
-        "--codex-command",
-        fakeCodex,
+        "--pi-command",
+        fakePi,
       ], {
         cwd: process.cwd(),
       });
@@ -4760,11 +4760,11 @@ describe("schemator", () => {
     try {
       const source = join(dir, "schema.ts");
       const runDir = join(dir, "run");
-      const fakeCodex = join(dir, "fake-codex.js");
-      await writeFakeModelReviewer(fakeCodex);
+      const fakePi = join(dir, "fake-pi.js");
+      await writeFakeModelReviewer(fakePi);
       await writeFile(source, ["type ModelProfilePolicy = {", "  promptRecipe?: string;", "};"].join("\n"));
 
-      await execFileAsync(tsxBin(), ["src/cli.ts", "run", "--source", source, "--out", runDir, "--codex-command", fakeCodex], {
+      await execFileAsync(tsxBin(), ["src/cli.ts", "run", "--source", source, "--out", runDir, "--pi-command", fakePi], {
         cwd: process.cwd(),
       });
       const report = await readFile(join(runDir, "final-report.md"), "utf8");

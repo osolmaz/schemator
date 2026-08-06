@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { Command } from "commander";
 import { findSkillsRoot, maybeHandleSkillflag } from "skillflag";
 import { renderPatchPlan } from "./apply.js";
-import { writeCodexReviews } from "./codex-review.js";
+import { writePiReviews } from "./pi-review.js";
 import { aggregateFromFiles, combineAggregates, deriveFinalGraph, runConvergence } from "./convergence.js";
 import { diffGraphs, renderGraphDiff } from "./diff.js";
 import { extractGraph } from "./extract/index.js";
@@ -61,11 +61,12 @@ program
   .requiredOption("--out <dir>", "review output directory")
   .option("--context <path>", "project/task context Markdown")
   .option("--jobs <dir>", "also write independent field-review prompts")
-  .option("--strategy <name>", "review strategy", "codex")
-  .option("--codex-command <path>", "Codex executable for --strategy codex", "codex")
-  .option("--codex-model <name>", "Codex model for --strategy codex")
-  .option("--codex-timeout-ms <n>", "per-field Codex timeout in milliseconds", "120000")
-  .option("--codex-concurrency <n>", "maximum concurrent Codex reviewers", "4")
+  .option("--strategy <name>", "review strategy", "pi")
+  .option("--pi-command <path>", "Pi review worker executable for --strategy pi")
+  .option("--pi-model <provider/model>", "Pi model for --strategy pi")
+  .option("--pi-thinking <level>", "Pi thinking level for --strategy pi")
+  .option("--pi-timeout-ms <n>", "per-field Pi timeout in milliseconds", "120000")
+  .option("--pi-concurrency <n>", "maximum concurrent Pi reviewers", "4")
   .action(async (options: ReviewCommandOptions) => {
     await runCommand(async () => {
       const graph = assertModelGraph(await readJson(resolvePath(options.graph)));
@@ -73,9 +74,9 @@ program
       if (options.jobs) {
         await writeReviewJobs(graph, resolvePath(options.jobs), reviewContextOptions(projectContext));
       }
-      const reviews = options.strategy === "codex"
-        ? await writeCodexReviews(graph, resolvePath(options.out), {
-          ...codexOptions(options),
+      const reviews = options.strategy === "pi"
+        ? await writePiReviews(graph, resolvePath(options.out), {
+          ...piOptions(options),
           ...reviewContextOptions(projectContext),
         })
         : options.strategy === "local"
@@ -202,11 +203,12 @@ program
   .requiredOption("--out <dir>", "run output directory")
   .option("--context <path>", "project/task context Markdown")
   .option("--max-iterations <n>", "maximum simplification iterations", "4")
-  .option("--strategy <name>", "review strategy", "codex")
-  .option("--codex-command <path>", "Codex executable for --strategy codex", "codex")
-  .option("--codex-model <name>", "Codex model for --strategy codex")
-  .option("--codex-timeout-ms <n>", "per-field Codex timeout in milliseconds", "120000")
-  .option("--codex-concurrency <n>", "maximum concurrent Codex reviewers", "4")
+  .option("--strategy <name>", "review strategy", "pi")
+  .option("--pi-command <path>", "Pi review worker executable for --strategy pi")
+  .option("--pi-model <provider/model>", "Pi model for --strategy pi")
+  .option("--pi-thinking <level>", "Pi thinking level for --strategy pi")
+  .option("--pi-timeout-ms <n>", "per-field Pi timeout in milliseconds", "120000")
+  .option("--pi-concurrency <n>", "maximum concurrent Pi reviewers", "4")
   .action(async (options: RunCommandOptions) => {
     await runCommand(async () => {
       const source = resolvePath(options.source);
@@ -216,7 +218,7 @@ program
         throw new Error("--max-iterations must be a positive integer");
       }
       const projectContext = await readProjectContext(options.context);
-      if (options.strategy !== "codex" && options.strategy !== "local") {
+      if (options.strategy !== "pi" && options.strategy !== "local") {
         unsupportedStrategy(options.strategy);
       }
       await runConvergence({
@@ -225,7 +227,7 @@ program
         maxIterations,
         strategy: options.strategy,
         ...(projectContext === undefined ? {} : { projectContext }),
-        codex: codexOptions(options),
+        pi: piOptions(options),
       });
     });
   });
@@ -238,10 +240,11 @@ type ReviewCommandOptions = {
   context?: string;
   jobs?: string;
   strategy: string;
-  codexCommand: string;
-  codexModel?: string;
-  codexTimeoutMs: string;
-  codexConcurrency: string;
+  piCommand?: string;
+  piModel?: string;
+  piThinking?: string;
+  piTimeoutMs: string;
+  piConcurrency: string;
 };
 
 type RunCommandOptions = {
@@ -250,31 +253,34 @@ type RunCommandOptions = {
   context?: string;
   maxIterations: string;
   strategy: string;
-  codexCommand: string;
-  codexModel?: string;
-  codexTimeoutMs: string;
-  codexConcurrency: string;
+  piCommand?: string;
+  piModel?: string;
+  piThinking?: string;
+  piTimeoutMs: string;
+  piConcurrency: string;
 };
 
-function codexOptions(
-  options: Pick<ReviewCommandOptions, "codexCommand" | "codexModel" | "codexTimeoutMs" | "codexConcurrency">,
+function piOptions(
+  options: Pick<ReviewCommandOptions, "piCommand" | "piModel" | "piThinking" | "piTimeoutMs" | "piConcurrency">,
 ): {
-  command: string;
+  command?: string;
   model?: string;
+  thinking?: string;
   timeoutMs: number;
   concurrency: number;
 } {
-  const timeoutMs = Number.parseInt(options.codexTimeoutMs, 10);
+  const timeoutMs = Number.parseInt(options.piTimeoutMs, 10);
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1) {
-    throw new Error("--codex-timeout-ms must be a positive integer");
+    throw new Error("--pi-timeout-ms must be a positive integer");
   }
-  const concurrency = Number.parseInt(options.codexConcurrency, 10);
+  const concurrency = Number.parseInt(options.piConcurrency, 10);
   if (!Number.isInteger(concurrency) || concurrency < 1) {
-    throw new Error("--codex-concurrency must be a positive integer");
+    throw new Error("--pi-concurrency must be a positive integer");
   }
   return {
-    command: options.codexCommand,
-    ...(options.codexModel ? { model: options.codexModel } : {}),
+    ...(options.piCommand === undefined ? {} : { command: options.piCommand }),
+    ...(options.piModel === undefined ? {} : { model: options.piModel }),
+    ...(options.piThinking === undefined ? {} : { thinking: options.piThinking }),
     timeoutMs,
     concurrency,
   };

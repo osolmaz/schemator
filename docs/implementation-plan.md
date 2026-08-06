@@ -352,15 +352,15 @@ drift.
 - Ship a TypeScript CLI on Node 22.
 - Support JSON Schema files plus Markdown fenced TypeScript, JSON, and YAML
   blocks first.
-- Generate one standalone review prompt per extracted field so Codex or other
+- Generate one standalone review prompt per extracted field so Pi or other
   model-review runners can consume stable jobs.
 - Support an optional `--context <file>` input for `create-jobs`, `review`, and
   `run`; include that context verbatim in generated field prompts and copy it
   into the run directory as `project-context.md`.
-- Use a Codex-backed review strategy by default. It starts one independent
-  `codex exec` reviewer per field, constrains the final answer with
-  `schemas/field-review.schema.json`, and validates every returned review before
-  aggregation.
+- Use a Pi-backed review strategy by default. It starts one independent Pi
+  reviewer per field in a bounded worker process, constrains the final answer
+  with `schemas/field-review.schema.json` through a `submit_field_review` tool,
+  and validates every returned review before aggregation.
 - Include a conservative deterministic local fallback only for smoke tests. It
   may keep fields or mark opaque owner boundaries, but it must not contain
   field-specific product rename/remove rules.
@@ -378,7 +378,7 @@ drift.
 
 ## Remaining Design Questions
 
-- Should ACP-compatible runners share the Codex command adapter, or should they
+- Should ACP-compatible runners share the Pi worker adapter, or should they
   consume the generated prompt jobs through a separate backend?
 - Should low-confidence keep/remove decisions trigger automatic second opinions?
 - What is the smallest structured requirements format that can let Schemator

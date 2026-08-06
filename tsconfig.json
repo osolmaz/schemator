@@ -15,6 +15,7 @@
     "noFallthroughCasesInSwitch": true,
     "noPropertyAccessFromIndexSignature": true,
     "useUnknownInCatchVariables": true,
+    "skipLibCheck": true,
     "noEmitOnError": true,
     "declaration": true,
     "sourceMap": true
