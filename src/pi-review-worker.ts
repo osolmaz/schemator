@@ -82,6 +82,7 @@ async function runFieldReview(prompt: string, options: WorkerOptions): Promise<F
     noSkills: true,
     noPromptTemplates: true,
     noThemes: true,
+    noContextFiles: true,
     systemPrompt: SYSTEM_PROMPT,
   });
   await resourceLoader.reload();
