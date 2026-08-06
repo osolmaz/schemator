@@ -65,9 +65,12 @@ naming constraints before applying schema changes.
 
 ## Review Strategy
 
-`codex` is the default strategy. It starts one independent `codex exec` reviewer
-per field, validates each JSON result, aggregates the decisions, and applies
-safe changes.
+`pi` is the default strategy. It starts one independent Pi reviewer per field
+in a bounded worker process. Each worker runs an in-memory Pi session with a
+single `submit_field_review` tool, validates each JSON result, aggregates the
+decisions, and applies safe changes. Pi uses its canonical authentication and
+model configuration; pass `--pi-model provider/model` and `--pi-thinking`
+to pin a reviewer model.
 
 Use local mode only for smoke tests:
 

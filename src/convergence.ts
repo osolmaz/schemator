@@ -3,7 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { aggregateReviews, readReviews } from "./aggregate.js";
 import { renderPatchPlan } from "./apply.js";
-import { writeCodexReviews, type CodexReviewOptions } from "./codex-review.js";
+import { writePiReviews, type PiReviewOptions } from "./pi-review.js";
 import { extractGraph } from "./extract/index.js";
 import { readJson, writeJson, writeText } from "./files.js";
 import {
@@ -19,7 +19,7 @@ import { writeDeterministicReviews } from "./review.js";
 import type { AggregateReview, ModelGraph } from "./types.js";
 import { validateAggregateReview, validateFieldReview, validateModelGraph } from "./validate.js";
 
-export type ReviewStrategy = "codex" | "local";
+export type ReviewStrategy = "pi" | "local";
 
 export type RunConvergenceOptions = {
   source: string;
@@ -27,7 +27,7 @@ export type RunConvergenceOptions = {
   maxIterations: number;
   strategy: ReviewStrategy;
   projectContext?: string;
-  codex?: Pick<CodexReviewOptions, "command" | "model" | "timeoutMs" | "concurrency">;
+  pi?: Pick<PiReviewOptions, "command" | "model" | "thinking" | "timeoutMs" | "concurrency">;
 };
 
 export type RunSummary = {
@@ -69,9 +69,9 @@ export async function runConvergence(options: RunConvergenceOptions): Promise<Ru
     await writeJson(graphPath, graph);
     const reviewOptions = reviewContextOptions(options.projectContext, runHistory);
     await writeReviewJobs(graph, jobsDir, reviewOptions);
-    if (options.strategy === "codex") {
-      await writeCodexReviews(graph, reviewsDir, {
-        ...(options.codex ?? {}),
+    if (options.strategy === "pi") {
+      await writePiReviews(graph, reviewsDir, {
+        ...(options.pi ?? {}),
         ...reviewOptions,
       });
     } else {

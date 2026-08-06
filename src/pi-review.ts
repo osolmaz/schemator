@@ -6,9 +6,10 @@ import { renderFieldPrompt, type RunHistoryEntry } from "./jobs.js";
 import type { FieldReview, ModelGraph } from "./types.js";
 import { validateFieldReview } from "./validate.js";
 
-export type CodexReviewOptions = {
+export type PiReviewOptions = {
   command?: string;
   model?: string;
+  thinking?: string;
   cwd?: string;
   timeoutMs?: number;
   concurrency?: number;
@@ -16,10 +17,10 @@ export type CodexReviewOptions = {
   runHistory?: RunHistoryEntry[];
 };
 
-export async function writeCodexReviews(
+export async function writePiReviews(
   graph: ModelGraph,
   outputDir: string,
-  options: CodexReviewOptions = {},
+  options: PiReviewOptions = {},
 ): Promise<FieldReview[]> {
   await prepareGeneratedOutputDir(outputDir, ".review.json");
   const jobs = graph.models.flatMap((model) => model.fields.map((field) => ({ model, field })));
@@ -48,14 +49,14 @@ export async function writeCodexReviews(
           },
         );
         const review = bindReviewIdentity(
-          await runCodexFieldReview(prompt, options, abortController.signal),
+          await runPiFieldReview(prompt, options, abortController.signal),
           model.id,
           field.path,
         );
         const validation = validateFieldReview(review);
         if (!validation.ok) {
           throw new Error(
-            `Codex review for ${model.id}.${field.path} is invalid:\n${validation.errors.join("\n")}`,
+            `Pi review for ${model.id}.${field.path} is invalid:\n${validation.errors.join("\n")}`,
           );
         }
         reviews[index] = review;
@@ -75,7 +76,7 @@ export async function writeCodexReviews(
   }
   for (const review of reviews) {
     if (!review) {
-      throw new Error("Codex review worker finished without writing every review.");
+      throw new Error("Pi review worker finished without writing every review.");
     }
   }
   return reviews;
@@ -89,25 +90,19 @@ function bindReviewIdentity(review: FieldReview, model: string, fieldPath: strin
   };
 }
 
-async function runCodexFieldReview(
+async function runPiFieldReview(
   prompt: string,
-  options: CodexReviewOptions,
+  options: PiReviewOptions,
   signal?: AbortSignal,
 ): Promise<FieldReview> {
-  const command = options.command ?? "codex";
+  const [command, ...baseArgs] = workerCommand(options.command);
+  if (command === undefined) {
+    throw new Error("Pi review worker command is empty");
+  }
   const args = [
-    "--ask-for-approval",
-    "never",
-    "exec",
-    "--skip-git-repo-check",
-    "--sandbox",
-    "read-only",
-    "--output-schema",
-    fieldReviewSchemaPath(),
-    "--color",
-    "never",
-    ...(options.model ? ["--model", options.model] : []),
-    "-",
+    ...baseArgs,
+    ...(options.model === undefined ? [] : ["--model", options.model]),
+    ...(options.thinking === undefined ? [] : ["--thinking", options.thinking]),
   ];
   const output = await execWithInput(command, args, prompt, {
     cwd: options.cwd ?? process.cwd(),
@@ -117,8 +112,11 @@ async function runCodexFieldReview(
   return parseFieldReviewOutput(output);
 }
 
-function fieldReviewSchemaPath(): string {
-  return join(dirname(fileURLToPath(import.meta.url)), "..", "schemas", "field-review.codex-output.schema.json");
+function workerCommand(command: string | undefined): string[] {
+  if (command !== undefined) {
+    return [command];
+  }
+  return [process.execPath, join(dirname(fileURLToPath(import.meta.url)), "pi-review-worker.js")];
 }
 
 function execWithInput(
@@ -134,6 +132,12 @@ function execWithInput(
     }
     const child = spawn(command, args, {
       cwd: options.cwd,
+      env: {
+        ...process.env,
+        PI_OFFLINE: "1",
+        PI_SKIP_VERSION_CHECK: "1",
+        PI_TELEMETRY: "0",
+      },
       stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "";
@@ -210,7 +214,7 @@ function parseFieldReviewOutput(output: string): FieldReview {
     return normalizeFieldReview(objectJson);
   }
 
-  throw new Error("Codex review did not return a JSON object");
+  throw new Error("Pi review did not return a JSON object");
 }
 
 function normalizeFieldReview(value: unknown): FieldReview {
