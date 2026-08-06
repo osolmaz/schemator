@@ -16,7 +16,7 @@ schema report.
 2. Write or locate project/task context before review. Context should explain
    the product goal, naming conventions, borrowed vocabulary, user-facing
    constraints, and what should remain stable.
-3. Run real Codex review for semantic decisions. Use the local strategy only
+3. Run real Pi review for semantic decisions. Use the local strategy only
    for smoke tests and plumbing checks.
 4. Inspect generated prompts under `jobs.iteration-N/` when decisions look
    wrong. Verify the expected context is actually injected.

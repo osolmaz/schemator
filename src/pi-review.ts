@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { pathToFileNamePart, prepareGeneratedOutputDir, writeJson } from "./files.js";
@@ -116,7 +117,14 @@ function workerCommand(command: string | undefined): string[] {
   if (command !== undefined) {
     return [command];
   }
-  return [process.execPath, join(dirname(fileURLToPath(import.meta.url)), "pi-review-worker.js")];
+  const moduleDir = dirname(fileURLToPath(import.meta.url));
+  const builtWorker = join(moduleDir, "pi-review-worker.js");
+  if (existsSync(builtWorker)) {
+    return [process.execPath, builtWorker];
+  }
+  // Source checkouts run the CLI through tsx before dist exists; launch the
+  // worker through the same TypeScript loader.
+  return [process.execPath, "--import", "tsx", join(moduleDir, "pi-review-worker.ts")];
 }
 
 function execWithInput(
